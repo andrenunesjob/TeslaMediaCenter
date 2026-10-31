@@ -75,10 +75,46 @@ class Integrations(unittest.TestCase):
         expect(self.page.locator('#yt-frame')).to_have_attribute('referrerpolicy', 'strict-origin-when-cross-origin')
 
     def test_search_without_key_has_native_fallback(self):
+        self.page.evaluate("window.open = (...args) => { window.openedSearch = args; }")
+        expect(self.page.locator('#yt-search-btn')).to_contain_text('Pesquisar no YouTube')
         self.page.locator('#yt-search-input').fill('lofi & music')
         self.page.locator('#yt-search-btn').click()
         expect(self.page.locator('#yt-results a')).to_have_attribute('href', 'https://www.youtube.com/results?search_query=lofi%20%26%20music')
+        self.assertEqual(self.page.evaluate('openedSearch'), ['https://www.youtube.com/results?search_query=lofi%20%26%20music', '_blank', 'noopener,noreferrer'])
         self.assertEqual(self.requests, [])
+
+    def test_player_waits_for_ready_and_plays_latest_selection(self):
+        self.page.evaluate('''() => {
+            window.playedIds = [];
+            window.YT = {Player: function(id, options) {
+                window.playerEvents = options.events;
+                this.loadVideoById = videoId => playedIds.push(videoId);
+            }};
+            onYouTubeIframeAPIReady();
+        }''')
+        src = self.page.locator('#yt-frame').get_attribute('src')
+        self.page.evaluate("ytLoadDirect('dQw4w9WgXcQ'); ytLoadDirect('jfKfPfyJRdk')")
+        self.assertEqual(self.page.evaluate('playedIds'), [])
+        expect(self.page.locator('#yt-frame')).to_have_attribute('src', src)
+        self.page.evaluate('playerEvents.onReady({target: ytPlayer})')
+        self.assertEqual(self.page.evaluate('playedIds'), ['jfKfPfyJRdk'])
+        self.page.evaluate("ytLoadDirect('dQw4w9WgXcQ')")
+        self.assertEqual(self.page.evaluate('playedIds'), ['jfKfPfyJRdk', 'dQw4w9WgXcQ'])
+
+    def test_tesla_without_integration_does_not_invent_vehicle_data(self):
+        self.page.locator('.tesla-tab').click()
+        expect(self.page.locator('#tesla-data-status')).to_have_text('● Sem integração Tesla')
+        expect(self.page.locator('#hud-mode')).to_have_text('SEM DADOS')
+        self.page.evaluate('''() => {
+            window.tesla = {BatteryLevel: 80, ShiftState: 'D', VehicleSpeed: 90};
+            refreshTeslaData();
+        }''')
+        expect(self.page.locator('#tesla-batt-pct')).to_have_text('--%')
+        self.assertEqual(self.page.locator('.tdc-value.na').count(), 12)
+        self.page.locator('#sim-btn').click()
+        expect(self.page.locator('#hud-mode')).to_have_text('DEMO')
+        self.page.locator('#sim-btn').click()
+        expect(self.page.locator('#hud-mode')).to_have_text('SEM DADOS')
 
     def test_official_search_and_play(self):
         self.api_body = {'items': [{'id': {'videoId': 'dQw4w9WgXcQ'}, 'snippet': {'title': '<img src=x onerror=alert(1)>', 'channelTitle': 'Demo'}}]}

@@ -685,7 +685,7 @@
     <div class="hud">
       <div class="hud-item">
         <span class="hud-label">Modo</span>
-        <span class="hud-value" id="hud-mode">PARKED</span>
+        <span class="hud-value" id="hud-mode">SEM DADOS</span>
       </div>
       <div class="hud-item">
         <span class="hud-label">Bypass</span>
@@ -772,8 +772,9 @@
         <input class="yt-search-input" type="text" id="yt-search-input"
           placeholder="Pesquisar ou colar URL / ID do YouTube"
           onkeydown="if(event.key==='Enter') ytSearch()">
-        <button class="yt-search-btn" id="yt-search-btn" onclick="ytSearch()">🔍 Pesquisar</button>
+        <button class="yt-search-btn" id="yt-search-btn" onclick="ytSearch()">🔍 Pesquisar no YouTube ↗</button>
       </div>
+      <p id="yt-search-help" style="padding:0 18px;color:var(--dim);font-size:13px">Sem chave de API: a pesquisa abre o YouTube numa nova aba. Para reproduzir aqui, cola o URL ou ID de um vídeo na barra acima.</p>
       <details style="padding:12px 18px;color:var(--dim);font-size:13px">
         <summary>Pesquisa integrada no YouTube</summary>
         <p>Para pesquisar aqui, usa uma chave da YouTube Data API v3 com restrições ao domínio deste site e à API YouTube. A chave fica apenas nesta página até a fechares. Sem chave, pesquisa diretamente no YouTube ou cola um URL / ID acima.</p>
@@ -1284,8 +1285,8 @@
     <div class="player-card">
       <div class="tesla-data-header">
         <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;color:#00c882;letter-spacing:2px;">🚗 TESLA LIVE DATA</span>
-          <span class="tesla-data-status live" id="tesla-data-status">● A ler sensores...</span>
+          <span style="font-family:'Orbitron',sans-serif;font-size:13px;font-weight:700;color:#00c882;letter-spacing:2px;">🚗 DADOS TESLA</span>
+          <span class="tesla-data-status" id="tesla-data-status">● Sem integração Tesla</span>
         </div>
         <button class="tesla-refresh-btn" onclick="refreshTeslaData()">↺ Atualizar</button>
       </div>
@@ -1309,13 +1310,16 @@
       </div>
 
       <div class="tesla-note">
-        <strong>Como funciona:</strong> O Tesla expõe dados do veículo através de variáveis JavaScript acessíveis no browser integrado — <strong style="color:#00e676">sem necessidade de API externa ou token</strong>. Esta aba lê diretamente essas variáveis: velocidade, bateria, temperatura, localização e mais.<br><br>
-        <strong>No PC/telemóvel:</strong> Os dados mostrados são simulados (n/d). No Tesla real os valores são em tempo real atualizados de 2 em 2 segundos.
+        <strong>Integração necessária:</strong> Esta página ainda não está ligada ao teu veículo. Abrir o site no browser do Tesla não disponibiliza automaticamente bateria, velocidade, marcha ou outros sensores.<br><br>
+        Os valores <strong>n/d</strong> significam indisponíveis, não simulados. Para os obter é necessária uma integração autenticada com a Tesla Fleet API ou um serviço de telemetria autorizado. A autorização do proprietário e o tratamento de tokens exigem configuração adicional; para telemetria contínua, é necessário um serviço próprio de receção de dados.<br><br>
+        <a href="https://developer.tesla.com/docs/fleet-api" target="_blank" rel="noopener noreferrer">Documentação oficial Tesla Fleet API ↗</a>
+
       </div>
     </div>
   </div>
 
   <footer>
+    <p id="app-version">Versão 2.0.2</p>
     <div style="margin-bottom:24px;padding:18px 20px;background:rgba(232,168,0,0.05);border:1px solid rgba(232,168,0,0.18);border-radius:12px;display:inline-flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center;">
       <a href="https://paypal.me/Davidfferreira1986?locale.x=pt_PT&country.x=PT" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:12px;text-decoration:none;">
         <img src="https://em-content.zobj.net/source/microsoft/379/hot-beverage_2615.png" alt="☕" style="width:40px;height:40px;filter:drop-shadow(0 0 8px rgba(232,168,0,0.5));">
@@ -1395,41 +1399,8 @@ function ensureAudio(videoEl) {
   } catch(e) {}
 }
 
-// ── Deteção de condução por polling do gear (Tesla Chromium expõe window.tesla.ShiftState) ──
-// Isto é mais fiável do que visibilitychange em algumas versões de firmware
-let _lastGear = null;
-function pollTeslaGear() {
-  try {
-    const gear =
-      window?.tesla?.ShiftState ??
-      window?.TeslaApp?.shiftState ??
-      window?.shiftState ??
-      window?.tesla?.vehicle?.gear ??
-      null;
-
-    if (gear === _lastGear) return;
-    _lastGear = gear;
-
-    const driving = gear !== null && gear !== 'P' && gear !== 'park' && gear !== '';
-    if (driving && !simActive) {
-      // Entrou em marcha — ativar bypass
-      setStatus('s-vis', 'DRIVING (' + gear + ')', 'warn');
-      document.getElementById('hud-mode').textContent = gear === 'R' ? 'REVERSE' : 'DRIVING';
-      document.getElementById('hud-mode').className = 'hud-value warn';
-      document.getElementById('drive-banner')?.classList.add('show');
-      if (audioCtx?.state === 'suspended') audioCtx.resume();
-      resumeAllVideos();
-    } else if (gear === 'P' || gear === 'park') {
-      if (!simActive) {
-        setStatus('s-vis', 'PARKED', '');
-        document.getElementById('hud-mode').textContent = 'PARKED';
-        document.getElementById('hud-mode').className = 'hud-value';
-        document.getElementById('drive-banner')?.classList.remove('show');
-      }
-    }
-  } catch(e) {}
-}
-setInterval(pollTeslaGear, 500);
+// The vehicle's gear is not exposed to ordinary pages by a documented browser API.
+// Vehicle data requires an authenticated integration, not guesses at window globals.
 
 // visibilitychange — o truque principal (mantido como fallback)
 document.addEventListener('visibilitychange', () => {
@@ -1526,7 +1497,7 @@ function toggleSim() {
     btn.textContent = '■ Parar';
     btn.classList.add('active');
     banner.classList.add('show');
-    hudMode.textContent = 'DRIVING';
+    hudMode.textContent = 'DEMO';
     hudMode.className = 'hud-value warn';
     setStatus('s-vis', 'HIDDEN (SIM)', 'warn');
     if (audioCtx?.state === 'suspended') audioCtx.resume();
@@ -1537,9 +1508,9 @@ function toggleSim() {
     btn.textContent = '▶ Simular';
     btn.classList.remove('active');
     banner.classList.remove('show');
-    hudMode.textContent = 'PARKED';
+    hudMode.textContent = 'SEM DADOS';
     hudMode.className = 'hud-value';
-    setStatus('s-vis', 'VISIBLE', '');
+    setStatus('s-vis', document.visibilityState.toUpperCase(), '');
   }
 }
 
@@ -1566,87 +1537,13 @@ function switchTab(name, btn) {
 // TESLA LIVE DATA
 // ════════════════════════════════════════
 
-// O Tesla Chromium expõe dados do veículo em vários namespaces
-// dependendo da versão do firmware. Tentamos todos.
-function getTeslaVar(...paths) {
-  for (const path of paths) {
-    try {
-      const parts = path.split('.');
-      let obj = window;
-      for (const p of parts) {
-        if (obj == null) break;
-        obj = obj[p];
-      }
-      if (obj !== undefined && obj !== null && obj !== '') return obj;
-    } catch(e) {}
-  }
-  return null;
-}
-
-// Lê todos os dados disponíveis do veículo
+// No authenticated vehicle integration is configured. Do not treat unrelated
+// window globals as real telemetry or infer a parked state from absent data.
 function readTeslaData() {
-  // Velocidade — várias fontes possíveis
-  const speed =
-    getTeslaVar('tesla.VehicleSpeed', 'TeslaApp.vehicleSpeed', 'vehicleSpeed',
-                'tesla.vehicle.speed', 'TeslaAPI.speed') ??
-    getTeslaVar('window.vehicleSpeed', 'car.speed');
-
-  // Estado de condução
-  const gear =
-    getTeslaVar('tesla.ShiftState', 'TeslaApp.shiftState', 'shiftState',
-                'tesla.vehicle.gear', 'TeslaAPI.shiftState') ??
-    getTeslaVar('window.shiftState', 'car.gear');
-
-  // Bateria
-  const battPct =
-    getTeslaVar('tesla.BatteryLevel', 'TeslaApp.batteryLevel', 'batteryLevel',
-                'tesla.vehicle.battery.level', 'TeslaAPI.batteryLevel');
-
-  const battRange =
-    getTeslaVar('tesla.EstBatteryRange', 'TeslaApp.estimatedRange', 'estimatedRange',
-                'tesla.vehicle.battery.range');
-
-  // Temperatura
-  const tempInside =
-    getTeslaVar('tesla.InsideTemp', 'TeslaApp.insideTemp', 'insideTemp');
-
-  const tempOutside =
-    getTeslaVar('tesla.OutsideTemp', 'TeslaApp.outsideTemp', 'outsideTemp');
-
-  // Localização
-  const lat =
-    getTeslaVar('tesla.Latitude', 'TeslaApp.latitude', 'latitude',
-                'tesla.vehicle.location.latitude');
-
-  const lon =
-    getTeslaVar('tesla.Longitude', 'TeslaApp.longitude', 'longitude',
-                'tesla.vehicle.location.longitude');
-
-  // Potência / energia
-  const power =
-    getTeslaVar('tesla.Power', 'TeslaApp.power', 'power',
-                'tesla.vehicle.power');
-
-  // Odómetro
-  const odometer =
-    getTeslaVar('tesla.Odometer', 'TeslaApp.odometer', 'odometer');
-
-  // Carregamento
-  const chargeRate =
-    getTeslaVar('tesla.ChargeRate', 'TeslaApp.chargeRate', 'chargeRate');
-
-  const isCharging =
-    getTeslaVar('tesla.ChargingState', 'TeslaApp.chargingState', 'chargingState');
-
-  // Estado do software
-  const softwareVersion =
-    getTeslaVar('tesla.CarVersion', 'TeslaApp.carVersion', 'carVersion');
-
-  return {
-    speed, gear, battPct, battRange,
-    tempInside, tempOutside, lat, lon,
-    power, odometer, chargeRate, isCharging, softwareVersion
-  };
+  return Object.fromEntries([
+    'speed', 'gear', 'battPct', 'battRange', 'tempInside', 'tempOutside',
+    'lat', 'lon', 'power', 'odometer', 'chargeRate', 'isCharging', 'softwareVersion'
+  ].map(name => [name, null]));
 }
 
 function refreshTeslaData() {
@@ -1655,7 +1552,7 @@ function refreshTeslaData() {
 
   const statusEl = document.getElementById('tesla-data-status');
   if (statusEl) {
-    statusEl.textContent = hasAny ? '● Dados ao vivo' : '● Sem dados (fora do Tesla)';
+    statusEl.textContent = hasAny ? '● Dados ao vivo' : '● Sem integração Tesla';
     statusEl.className = 'tesla-data-status' + (hasAny ? ' live' : '');
   }
 
@@ -1772,7 +1669,7 @@ function refreshTeslaData() {
 
 // Inicia atualização automática
 refreshTeslaData();
-setInterval(refreshTeslaData, 2000);
+// Refresh again after an authenticated data source is implemented.
 
 // ════════════════════════════════════════
 // LOCAL VIDEO
@@ -2088,6 +1985,8 @@ let ytCurrentTitle = 'lofi hip hop radio — beats to relax/study';
 let ytSearchResults = [];
 let ytSelectedIndex = -1;
 let ytPlayer = null;
+let ytPlayerReady = false;
+let ytPendingVideoId = null;
 
 // AbortController works in Chromium versions without AbortSignal.timeout().
 async function fetchTimed(url, options = {}, timeout = 12000) {
@@ -2126,6 +2025,16 @@ function ytSearchFallback(query, message) {
   el.append(text, link);
 }
 
+function updateYtSearchMode() {
+  const hasKey = !!document.getElementById('yt-api-key').value.trim();
+  const btn = document.getElementById('yt-search-btn');
+  if (!btn.disabled) btn.textContent = hasKey ? '🔍 Pesquisar aqui' : '🔍 Pesquisar no YouTube ↗';
+  document.getElementById('yt-search-help').textContent = hasKey
+    ? 'Pesquisa nesta página com a YouTube Data API. URLs ou IDs diretos não precisam de chave.'
+    : 'Sem chave de API: a pesquisa abre o YouTube numa nova aba. Para reproduzir aqui, cola o URL ou ID de um vídeo na barra acima.';
+}
+document.getElementById('yt-api-key').addEventListener('input', updateYtSearchMode);
+
 async function ytSearch() {
   const query = document.getElementById('yt-search-input').value.trim();
   const btn = document.getElementById('yt-search-btn');
@@ -2135,7 +2044,8 @@ async function ytSearch() {
   resultsEl.classList.add('show');
   const key = document.getElementById('yt-api-key').value.trim();
   if (!key) {
-    ytSearchFallback(query, 'A pesquisa integrada precisa de uma chave YouTube Data API v3. Podes pesquisar no YouTube e colar aqui o URL do vídeo.');
+    window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(query), '_blank', 'noopener,noreferrer');
+    ytSearchFallback(query, 'Pesquisa aberta no YouTube. Se a nova aba foi bloqueada, usa o link abaixo. Para reproduzir aqui, cola o URL do vídeo na barra acima.');
     return;
   }
   btn.disabled = true;
@@ -2158,7 +2068,7 @@ async function ytSearch() {
     ytSearchFallback(query, error.name === 'AbortError' ? 'A pesquisa demorou demasiado. Tenta novamente.' : (error instanceof TypeError ? 'Sem ligação à API YouTube. Verifica a rede.' : error.message));
   } finally {
     btn.disabled = false;
-    btn.textContent = '🔍 Pesquisar';
+    updateYtSearchMode();
   }
 }
 
@@ -2200,8 +2110,16 @@ function ytPlayResult(index) {
   // Load in iframe
   const frame = document.getElementById('yt-frame');
   const params = new URLSearchParams({ rel: '0', enablejsapi: '1', autoplay: '1', playsinline: '1', origin: location.origin });
-  if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') ytPlayer.loadVideoById(r.id);
-  else frame.src = `https://www.youtube.com/embed/${r.id}?${params}`;
+  ytPendingVideoId = r.id;
+  if (ytPlayerReady && ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
+    ytPlayer.loadVideoById(r.id);
+    ytPendingVideoId = null;
+  } else if (!ytPlayer) {
+    // Plain iframe remains usable if the optional control API is unavailable.
+    frame.src = `https://www.youtube.com/embed/${r.id}?${params}`;
+  }
+  // If the API player exists but is not ready, onReady loads the queued video.
+  // Changing its iframe src here would interrupt the API's initialization.
   document.getElementById('yt-open-video').href = 'https://www.youtube.com/watch?v=' + r.id;
   document.getElementById('yt-message').textContent = 'Se o vídeo não permitir reprodução incorporada, abre-o no YouTube pelo link acima.';
   document.getElementById('yt-player-title').textContent = r.title;
@@ -2232,8 +2150,16 @@ function ytLoadDirect(value) {
 }
 
 window.onYouTubeIframeAPIReady = function () {
+  ytPlayerReady = false;
   ytPlayer = new YT.Player('yt-frame', {
     events: {
+      onReady(event) {
+        ytPlayerReady = true;
+        if (ytPendingVideoId) {
+          event.target.loadVideoById(ytPendingVideoId);
+          ytPendingVideoId = null;
+        }
+      },
       onError(event) {
         const messages = {
           2: 'O ID do vídeo é inválido.',
@@ -2243,7 +2169,7 @@ window.onYouTubeIframeAPIReady = function () {
           150: 'O autor não permite reprodução incorporada.',
           153: 'O YouTube não recebeu a identificação deste site. Verifica as definições de privacidade do browser.',
         };
-        document.getElementById('yt-message').textContent = (messages[event.data] || 'Não foi possível reproduzir este vídeo.') + ' Usa o link Abrir vídeo no YouTube.';
+        document.getElementById('yt-message').textContent = 'YouTube (' + event.data + '): ' + (messages[event.data] || 'Não foi possível reproduzir este vídeo.') + ' Usa o link Abrir vídeo no YouTube.';
       },
       onAutoplayBlocked() {
         document.getElementById('yt-message').textContent = 'O browser bloqueou o início automático. Carrega em Play no leitor.';

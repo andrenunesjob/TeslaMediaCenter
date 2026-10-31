@@ -1,6 +1,6 @@
 # 🚗 Tesla Media Center v2.0
 
-Site de ficheiro único (`index.html`) que permite reproduzir **YouTube, Netflix, Upload local, Plex, Jellyfin e IPTV** no browser Chromium do Tesla — com bypass de condução ativo, dados do veículo em tempo real e zero dependências externas.
+Site de ficheiro único (`index.html`) que permite reproduzir **YouTube, Netflix, Upload local, Plex, Jellyfin e IPTV** no browser Chromium do Tesla — com integrações multimédia sujeitas à compatibilidade do browser e dos serviços. Os dados Tesla ainda não têm uma integração autenticada.
 
 **[🔗 Ver Demo ao Vivo](https://davidfferreira.github.io/TeslaMediaCenter)**
 
@@ -31,7 +31,7 @@ Seleciona a aba pretendida — YouTube, Netflix, Upload, Plex, Jellyfin ou IPTV 
 ### 3. Dar play e arrancar
 Com o vídeo a tocar e o carro estacionado, arranca normalmente. O browser muda automaticamente para modo condução — o bypass interceta esse evento e o vídeo **continua sem interrupção**.
 
-> **O botão "Simular"** existe apenas para testar o bypass no PC ou telemóvel. No Tesla real o bypass ativa-se sozinho ao entrar em marcha — não precisas de fazer nada.
+> **O botão "Simular"** existe apenas para testar o bypass no PC ou telemóvel. Este site não tem acesso à marcha real do veículo; a simulação não comprova funcionamento no Tesla.
 
 ### 4. Durante a viagem
 O vídeo e o áudio continuam ativos. O Wake Lock impede o ecrã de adormecer. Se o vídeo pausar por qualquer motivo, o Pause Intercept retoma-o automaticamente em menos de 120 ms.
@@ -42,13 +42,13 @@ O vídeo e o áudio continuam ativos. O Wake Lock impede o ecrã de adormecer. S
 
 | Tab | Descrição |
 |---|---|
-| **▶ YouTube** | Pesquisa integrada via API Invidious + embed com bypass ativo. Fallback para colar URL/ID diretamente. |
+| **▶ YouTube** | URLs/IDs diretos e leitor oficial. Pesquisa integrada com chave YouTube Data API v3, ou link de pesquisa externa sem chave. |
 | **🎞 Netflix** | Instruções para abrir a Netflix numa nova tab com bypass sempre ativo nesta página. |
 | **⬆ Upload** | Carrega um ficheiro MP4/WebM local — ideal para testar o bypass no PC ou telemóvel. |
 | **🎬 Plex** | Liga ao teu Plex Media Server via token manual ou autenticação PIN OAuth. Biblioteca completa com grid de capas. |
 | **🪼 Jellyfin** | Liga ao teu servidor Jellyfin com utilizador/palavra-passe. Direct stream sem transcodificação. |
 | **📡 IPTV** | Cola um URL de lista M3U e reproduz canais ao vivo. Filtros por grupo e nome, navegação de canal sem sair do player. |
-| **🚗 Tesla** | Dados do veículo em tempo real: velocidade, marcha, bateria, autonomia, temperaturas, localização, potência, odómetro. Atualiza a cada 2 segundos. |
+| **🚗 Tesla** | Painel sem ligação ao veículo. Mostra n/d até existir uma integração autenticada. |
 | **</> Código** | Código-fonte do bypass (tesla-bypass.js) para copiar e usar noutras páginas. |
 
 ---
@@ -56,7 +56,7 @@ O vídeo e o áudio continuam ativos. O Wake Lock impede o ecrã de adormecer. S
 ## HUD e Status Bar
 
 No topo da página existe um **HUD** com:
-- **Modo** — PARKED / DRIVING / REVERSE (lido diretamente do gear do veículo)
+- **Modo** — SEM DADOS; DEMO durante uma simulação. Não indica a marcha real do veículo.
 - **Bypass** — estado do motor de bypass
 - **Hora** — relógio em tempo real
 
@@ -71,25 +71,11 @@ Abaixo do HUD a **Status Bar** mostra em tempo real:
 
 ## Como funciona o Bypass (v2.0)
 
-O browser do Tesla (Chromium) dispara o evento `visibilitychange → hidden` quando o carro entra em marcha. Esta versão usa **quatro camadas independentes** para garantir a retoma em todos os cenários:
+O browser do Tesla (Chromium) dispara o evento `visibilitychange → hidden` quando o carro entra em marcha. O código tenta retomar a reprodução através dos eventos abaixo. Isso não garante reprodução no browser do Tesla:
 
-### Camada 1 — Polling do gear do veículo (nova em v2.0)
-```javascript
-// Corre de 500ms em 500ms — lê o ShiftState diretamente do Chromium do Tesla
-function pollTeslaGear() {
-  const gear =
-    window?.tesla?.ShiftState ??
-    window?.TeslaApp?.shiftState ??
-    window?.shiftState ?? null;
+### Limitação: marcha do veículo
 
-  if (gear !== 'P' && gear !== null) {
-    // Entrou em marcha: ativa bypass imediatamente, independente do visibilitychange
-    if (audioCtx?.state === 'suspended') audioCtx.resume();
-    resumeAllVideos();
-  }
-}
-setInterval(pollTeslaGear, 500);
-```
+A antiga tentativa de ler `window.tesla.ShiftState` foi removida: não corresponde a uma API documentada disponível a páginas normais. A simulação serve apenas para testar a interface. Eventos de visibilidade e tentativas de retoma não comprovam o estado do veículo nem garantem reprodução no browser Tesla.
 
 ### Camada 2 — visibilitychange com retry loop
 ```javascript
@@ -134,7 +120,6 @@ videoEl.addEventListener('pause', () => {
 
 | Técnica | Função |
 |---|---|
-| `pollTeslaGear` (500ms) | Lê `window.tesla.ShiftState` e ativa bypass ao detetar marcha |
 | `visibilitychange` + retry | Interceta o evento principal do Tesla com 10 tentativas |
 | `freeze` / `pagehide` / `blur` | Camadas extra para versões de firmware mais antigas |
 | `AudioContext API` | Mantém o pipeline de áudio ativo em segundo plano |
@@ -146,28 +131,11 @@ videoEl.addEventListener('pause', () => {
 
 ## Tab Tesla — Dados do Veículo
 
-A tab **🚗 Tesla** lê diretamente as variáveis JavaScript que o Chromium do Tesla expõe no `window`. Diferentes versões de firmware usam namespaces diferentes — o código tenta todos:
+Não existe atualmente uma fonte de dados Tesla autenticada neste projeto. A tentativa anterior de ler variáveis globais do browser não implementava a Tesla Fleet API. Os valores `n/d` significam indisponíveis, tanto no PC como no browser do veículo; não são dados simulados. O botão Atualizar não autoriza acesso ao veículo.
 
-```
-window.tesla.VehicleSpeed / ShiftState / BatteryLevel / EstBatteryRange
-window.tesla.InsideTemp / OutsideTemp / Latitude / Longitude / Power
-window.TeslaApp.vehicleSpeed / shiftState / batteryLevel / ...
-window.vehicleSpeed / shiftState / ... (namespace plano)
-```
+Para obter dados reais é necessário registar uma aplicação Tesla, obter autorização do proprietário e implementar o acesso autenticado à [Fleet API](https://developer.tesla.com/docs/fleet-api). Para atualizações contínuas, a [Fleet Telemetry oficial](https://github.com/teslamotors/fleet-telemetry) descreve o serviço de receção e a configuração do veículo. A disponibilidade dos campos depende da integração, veículo e firmware. Não coloques tokens Tesla ou chaves privadas em ficheiros públicos do GitHub Pages.
 
-**Dados mostrados:**
-- Velocidade (km/h)
-- Marcha (P / D / R / N)
-- Bateria (%) com barra visual com alerta a < 40% e crítico a < 20%
-- Autonomia estimada (km)
-- Temperatura interior e exterior (°C)
-- Potência instantânea (kW)
-- Localização GPS (latitude/longitude)
-- Odómetro (km)
-- Estado e taxa de carregamento
-- Versão do software
-
-> Fora do Tesla os valores aparecem como **n/d** — é o comportamento esperado. No Tesla real atualizam a cada 2 segundos.
+O frontend pode continuar no GitHub Pages, mas a autenticação e o serviço de telemetria precisam de infraestrutura adicional. Ainda não estão implementados neste repositório.
 
 ---
 
@@ -175,9 +143,9 @@ window.vehicleSpeed / shiftState / ... (namespace plano)
 
 A barra aceita um URL/ID diretamente, incluindo links `youtu.be`, `watch`, `shorts` e `live`, sem chave de API.
 
-Para resultados dentro desta página, abre **Pesquisa integrada no YouTube** e introduz uma chave da **YouTube Data API v3**. Ativa essa API no projeto Google Cloud e restringe a chave à API YouTube e aos referenciadores HTTP do site (por exemplo `https://andrenunesjob.github.io/*`). A chave fica apenas em memória nesta página; não a coloques no código ou no Git. A pesquisa está sujeita à quota da API. Sem chave, a interface oferece um link de pesquisa no YouTube, onde podes copiar o URL do vídeo.
+Para resultados dentro desta página, abre **Pesquisa integrada no YouTube** e introduz uma chave da **YouTube Data API v3**. Ativa essa API no projeto Google Cloud e restringe a chave à API YouTube e aos referenciadores HTTP do site (por exemplo `https://andrenunesjob.github.io/*`). A chave fica apenas em memória nesta página; não a coloques no código ou no Git. A pesquisa está sujeita à quota da API. Sem chave, o botão **Pesquisar no YouTube ↗** abre a pesquisa numa nova aba e mantém um link alternativo caso o browser bloqueie a abertura. Copia o URL de um vídeo para o reproduzir nesta página.
 
-O leitor envia a origem e preserva o referenciador HTTP exigido pelo YouTube. Vídeos privados, removidos ou sem autorização para incorporação continuam sujeitos às regras do YouTube. Há mensagens para erros do leitor e um link permanente para abrir o vídeo diretamente. O browser pode exigir um clique em Play para iniciar a reprodução.
+O leitor aguarda o evento de inicialização da API antes de enviar o vídeo selecionado, envia a origem e preserva o referenciador HTTP exigido pelo YouTube. Vídeos privados, removidos ou sem autorização para incorporação continuam sujeitos às regras do YouTube. Há mensagens para erros do leitor e um link permanente para abrir o vídeo diretamente. O browser pode exigir um clique em Play para iniciar a reprodução.
 
 ---
 
