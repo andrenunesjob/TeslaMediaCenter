@@ -173,16 +173,11 @@ window.vehicleSpeed / shiftState / ... (namespace plano)
 
 ## YouTube — Pesquisa integrada
 
-A pesquisa usa a **API pública Invidious** (frontend alternativo ao YouTube com CORS aberto) com failover automático por 5 instâncias independentes:
+A barra aceita um URL/ID diretamente, incluindo links `youtu.be`, `watch`, `shorts` e `live`, sem chave de API.
 
-1. Pesquisa na primeira instância disponível (timeout de 5 s por tentativa)
-2. Se falhar, passa automaticamente para a próxima instância
-3. Se todas falharem, mostra um campo para colar o URL ou ID do YouTube diretamente
+Para resultados dentro desta página, abre **Pesquisa integrada no YouTube** e introduz uma chave da **YouTube Data API v3**. Ativa essa API no projeto Google Cloud e restringe a chave à API YouTube e aos referenciadores HTTP do site (por exemplo `https://andrenunesjob.github.io/*`). A chave fica apenas em memória nesta página; não a coloques no código ou no Git. A pesquisa está sujeita à quota da API. Sem chave, a interface oferece um link de pesquisa no YouTube, onde podes copiar o URL do vídeo.
 
-**Usar URL/ID direto:**
-- URL completo: `https://www.youtube.com/watch?v=dQw4w9WgXcQ`
-- URL curto: `https://youtu.be/dQw4w9WgXcQ`
-- ID direto: `dQw4w9WgXcQ`
+O leitor envia a origem e preserva o referenciador HTTP exigido pelo YouTube. Vídeos privados, removidos ou sem autorização para incorporação continuam sujeitos às regras do YouTube. Há mensagens para erros do leitor e um link permanente para abrir o vídeo diretamente. O browser pode exigir um clique em Play para iniciar a reprodução.
 
 ---
 
@@ -253,6 +248,14 @@ Com o vídeo a tocar usa os botões **◀ Anterior** e **Próximo ▶** para tro
 3. Clica em **Ligar ao Jellyfin**
 4. Navega pela biblioteca e clica num item para reproduzir
 
+### Ligações a partir do GitHub Pages
+
+Usa o endereço base HTTPS com certificado válido, por exemplo `https://media.oqen.pt`. Links copiados de `/web/index.html#!/home.html` são normalizados; caminhos base de proxies (ex. `/jellyfin`) são preservados.
+
+O Jellyfin e qualquer reverse proxy precisam de aceitar pedidos CORS da origem `https://andrenunesjob.github.io`, incluindo o preflight `OPTIONS`, os métodos `GET`/`POST` e os cabeçalhos `Authorization` e `Content-Type`. Um proxy que exija um login próprio antes da API pode impedir o acesso. Não envies credenciais a proxies CORS públicos.
+
+A interface distingue autenticação recusada (401), permissões (403), endereço incorreto (404), timeout e falhas de rede/CORS/TLS. Os browsers não permitem distinguir CORS de TLS numa falha genérica de `fetch`; consulta a consola/rede do browser para identificar essa causa. Credenciais corretas não resolvem bloqueios de rede ou CORS. Um servidor HTTP comum não pode ser chamado a partir do GitHub Pages HTTPS; nesse caso configura HTTPS no servidor ou serve este site localmente por HTTP.
+
 ### Endpoint de stream usado
 ```
 /Videos/{id}/stream?Static=true&MediaSourceId={sourceId}&api_key={token}
@@ -282,3 +285,13 @@ Direct stream sem transcodificação — desde que o formato seja compatível co
 
 Este projeto é apenas para fins educativos e de entretenimento como passageiro. Não uses o ecrã do Tesla para ver vídeo enquanto és tu a conduzir — é ilegal e perigoso.
 
+
+## Testes de regressão
+
+Com Python, Chromium e o pacote Python `playwright` instalados, executa na raiz:
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
+Os testes usam respostas simuladas para a API YouTube e o Jellyfin, sem chaves ou credenciais reais. Verificam o comportamento do cliente; não comprovam o acesso ao teu servidor, as regras CORS do proxy ou a reprodução de vídeos reais do YouTube. O executável Chromium esperado é `/usr/bin/chromium`.

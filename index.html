@@ -770,15 +770,24 @@
       <!-- Search bar -->
       <div class="yt-search-bar">
         <input class="yt-search-input" type="text" id="yt-search-input"
-          placeholder="Pesquisar no YouTube... (ex: lofi, podcast, música)"
+          placeholder="Pesquisar ou colar URL / ID do YouTube"
           onkeydown="if(event.key==='Enter') ytSearch()">
         <button class="yt-search-btn" id="yt-search-btn" onclick="ytSearch()">🔍 Pesquisar</button>
       </div>
+      <details style="padding:12px 18px;color:var(--dim);font-size:13px">
+        <summary>Pesquisa integrada no YouTube</summary>
+        <p>Para pesquisar aqui, usa uma chave da YouTube Data API v3 com restrições ao domínio deste site e à API YouTube. A chave fica apenas nesta página até a fechares. Sem chave, pesquisa diretamente no YouTube ou cola um URL / ID acima.</p>
+        <label for="yt-api-key">Chave YouTube Data API v3</label>
+        <input class="yt-search-input" id="yt-api-key" type="password" autocomplete="off" placeholder="Chave da API (opcional)">
+      </details>
+      <p id="yt-message" role="status" style="padding:0 18px;color:var(--dim)"></p>
+      <p style="padding:0 18px"><a id="yt-open-video" href="https://www.youtube.com/watch?v=jfKfPfyJRdk" target="_blank" rel="noopener noreferrer">Abrir vídeo no YouTube ↗</a></p>
       <!-- Results -->
       <div class="yt-results" id="yt-results"></div>
       <div class="yt-wrap">
         <iframe id="yt-frame"
           src="https://www.youtube.com/embed/jfKfPfyJRdk?rel=0&modestbranding=1&enablejsapi=1"
+          title="Leitor YouTube" referrerpolicy="strict-origin-when-cross-origin"
           allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen>
         </iframe>
       </div>
@@ -962,7 +971,7 @@
           <div class="field-group">
             <label class="field-label">Endereço do Servidor Jellyfin</label>
             <input class="jelly-field-input" type="text" id="jelly-server-url"
-              placeholder="http://192.168.1.100:8096">
+              placeholder="https://jellyfin.exemplo.pt">
           </div>
           <div class="field-group">
             <label class="field-label">Utilizador</label>
@@ -977,7 +986,8 @@
               onkeydown="if(event.key==='Enter') connectJellyfin()">
           </div>
           <button class="jelly-btn" id="jelly-connect-btn" onclick="connectJellyfin()">🪼 Ligar ao Jellyfin</button>
-          <div id="jellyfin-error"></div>
+          <p style="font-size:12px;color:var(--dim)">No GitHub Pages, o servidor precisa de HTTPS com certificado válido e de permitir pedidos deste site (CORS). Usa o endereço base do servidor; também são aceites links da interface /web.</p>
+          <div id="jellyfin-error" role="alert"></div>
         </div>
 
         <div style="margin-top:8px;max-width:420px;background:rgba(0,164,220,0.05);border:1px solid rgba(0,164,220,0.15);border-radius:8px;padding:14px 16px">
@@ -2077,67 +2087,75 @@ let ytCurrentVideoId = 'jfKfPfyJRdk';
 let ytCurrentTitle = 'lofi hip hop radio — beats to relax/study';
 let ytSearchResults = [];
 let ytSelectedIndex = -1;
+let ytPlayer = null;
 
-// Instâncias públicas Invidious com CORS aberto — tentadas por ordem
-const INVIDIOUS_INSTANCES = [
-  'https://invidious.privacydev.net',
-  'https://yt.cdaut.de',
-  'https://invidious.nerdvpn.de',
-  'https://inv.tux.pizza',
-  'https://invidious.fdn.fr',
-];
+// AbortController works in Chromium versions without AbortSignal.timeout().
+async function fetchTimed(url, options = {}, timeout = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try { return await fetch(url, { ...options, signal: controller.signal }); }
+  finally { clearTimeout(timer); }
+}
 
-async function ytSearchInvidious(query) {
-  for (const base of INVIDIOUS_INSTANCES) {
-    try {
-      const url = `${base}/api/v1/search?q=${encodeURIComponent(query)}&type=video&fields=videoId,title,author,videoThumbnails&pretty=0`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (!Array.isArray(data) || !data.length) continue;
-      return data.slice(0, 12).map(v => ({
-        id: v.videoId,
-        title: v.title || 'Sem título',
-        channel: v.author || '',
-        thumb: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
-      }));
-    } catch(e) { /* tenta próxima instância */ }
-  }
-  return null; // todas falharam
+function ytVideoId(value) {
+  if (/^[a-zA-Z0-9_-]{11}$/.test(value)) return value;
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    let id = null;
+    if (host === 'youtu.be') id = url.pathname.split('/')[1];
+    else if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'www.youtube-nocookie.com'].includes(host)) {
+      const parts = url.pathname.split('/');
+      id = url.searchParams.get('v') || (['embed', 'shorts', 'live'].includes(parts[1]) ? parts[2] : null);
+    }
+    return /^[a-zA-Z0-9_-]{11}$/.test(id || '') ? id : null;
+  } catch (_) { return null; }
+}
+
+function ytSearchFallback(query, message) {
+  const el = document.getElementById('yt-results');
+  el.replaceChildren();
+  const text = document.createElement('p');
+  text.textContent = message;
+  const link = document.createElement('a');
+  link.href = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query);
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = 'Pesquisar no YouTube ↗';
+  el.append(text, link);
 }
 
 async function ytSearch() {
   const query = document.getElementById('yt-search-input').value.trim();
-  if (!query) return;
-
   const btn = document.getElementById('yt-search-btn');
+  if (!query || btn.disabled) return;
+  if (ytVideoId(query)) { ytLoadDirect(query); return; }
   const resultsEl = document.getElementById('yt-results');
-
+  resultsEl.classList.add('show');
+  const key = document.getElementById('yt-api-key').value.trim();
+  if (!key) {
+    ytSearchFallback(query, 'A pesquisa integrada precisa de uma chave YouTube Data API v3. Podes pesquisar no YouTube e colar aqui o URL do vídeo.');
+    return;
+  }
   btn.disabled = true;
   btn.textContent = '⏳ A pesquisar...';
-  resultsEl.classList.add('show');
-  resultsEl.innerHTML = '<div class="yt-results-loading"><div class="pin-spinner" style="border-top-color:var(--accent)"></div><span>A pesquisar no YouTube...</span></div>';
-
+  resultsEl.textContent = 'A pesquisar no YouTube...';
   try {
-    const results = await ytSearchInvidious(query);
-
-    if (results && results.length) {
-      ytSearchResults = results;
-      renderYtResults(ytSearchResults, query);
-    } else {
-      throw new Error('sem resultados');
+    const params = new URLSearchParams({ part: 'snippet', type: 'video', videoEmbeddable: 'true', maxResults: '12', q: query, key });
+    const response = await fetchTimed('https://www.googleapis.com/youtube/v3/search?' + params);
+    if (!response.ok) {
+      throw new Error(response.status === 403 ? 'Chave sem acesso, restrição de domínio ou quota da API excedida.' : 'A API YouTube não respondeu à pesquisa (HTTP ' + response.status + ').');
     }
-  } catch(e) {
-    // Fallback final: campo para colar URL/ID diretamente
-    resultsEl.innerHTML = `
-      <div class="yt-results-empty">
-        ⚠ Pesquisa indisponível de momento (todas as instâncias Invidious offline).<br><br>
-        <span style="color:var(--text)">Cola diretamente um URL ou ID do YouTube:</span><br>
-        <div style="display:flex;gap:8px;margin-top:10px">
-          <input class="yt-search-input" id="yt-direct-id" placeholder="URL ou ID do vídeo (ex: dQw4w9WgXcQ)" style="font-size:12px">
-          <button class="yt-search-btn" onclick="ytLoadDirect()">▶ Carregar</button>
-        </div>
-      </div>`;
+    const data = await response.json();
+    ytSelectedIndex = -1;
+    ytSearchResults = (data.items || []).filter(v => /^[a-zA-Z0-9_-]{11}$/.test(v.id?.videoId || '')).map(v => ({
+      id: v.id.videoId, title: v.snippet?.title || 'Sem título', channel: v.snippet?.channelTitle || '',
+      thumb: 'https://i.ytimg.com/vi/' + v.id.videoId + '/mqdefault.jpg',
+    }));
+    renderYtResults(ytSearchResults, query);
+  } catch (error) {
+    ytSearchFallback(query, error.name === 'AbortError' ? 'A pesquisa demorou demasiado. Tenta novamente.' : (error instanceof TypeError ? 'Sem ligação à API YouTube. Verifica a rede.' : error.message));
   } finally {
     btn.disabled = false;
     btn.textContent = '🔍 Pesquisar';
@@ -2147,7 +2165,7 @@ async function ytSearch() {
 function renderYtResults(results, query) {
   const el = document.getElementById('yt-results');
   if (!results.length) {
-    el.innerHTML = `<div class="yt-results-empty">Nenhum resultado para "<strong>${query}</strong>". Tenta outra pesquisa.</div>`;
+    el.textContent = `Nenhum resultado para "${query}". Tenta outra pesquisa.`;
     return;
   }
   el.innerHTML = '';
@@ -2157,11 +2175,13 @@ function renderYtResults(results, query) {
     item.innerHTML = `
       <img class="yt-result-thumb" src="${r.thumb}" alt="" onerror="this.style.background='var(--surface)';this.src=''">
       <div class="yt-result-info">
-        <div class="yt-result-title">${r.title}</div>
-        <div class="yt-result-channel">${r.channel}</div>
+        <div class="yt-result-title"></div>
+        <div class="yt-result-channel"></div>
       </div>
       <span style="color:var(--dim);font-size:20px">▶</span>
     `;
+    item.querySelector('.yt-result-title').textContent = r.title;
+    item.querySelector('.yt-result-channel').textContent = r.channel;
     item.onclick = () => ytPlayResult(i);
     el.appendChild(item);
   });
@@ -2179,30 +2199,65 @@ function ytPlayResult(index) {
 
   // Load in iframe
   const frame = document.getElementById('yt-frame');
-  frame.src = `https://www.youtube.com/embed/${r.id}?rel=0&modestbranding=1&enablejsapi=1&autoplay=1`;
+  const params = new URLSearchParams({ rel: '0', enablejsapi: '1', autoplay: '1', playsinline: '1', origin: location.origin });
+  if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') ytPlayer.loadVideoById(r.id);
+  else frame.src = `https://www.youtube.com/embed/${r.id}?${params}`;
+  document.getElementById('yt-open-video').href = 'https://www.youtube.com/watch?v=' + r.id;
+  document.getElementById('yt-message').textContent = 'Se o vídeo não permitir reprodução incorporada, abre-o no YouTube pelo link acima.';
   document.getElementById('yt-player-title').textContent = r.title;
   document.getElementById('yt-bar-label').textContent = r.title + (r.channel ? ' — ' + r.channel : '');
   ytCurrentVideoId = r.id;
   ytCurrentTitle = r.title;
 }
 
-function ytLoadDirect() {
-  const val = (document.getElementById('yt-direct-id')?.value || '').trim();
-  if (!val) return;
-
-  // Extract video ID from URL or use as-is
-  let videoId = val;
-  const urlMatch = val.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
-  if (urlMatch) videoId = urlMatch[1];
-
-  if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
-    alert('ID ou URL inválido.');
+function ytLoadDirect(value) {
+  const val = (value || document.getElementById('yt-search-input').value).trim();
+  const videoId = ytVideoId(val);
+  if (!videoId) {
+    document.getElementById('yt-message').textContent = 'ID ou URL do YouTube inválido.';
     return;
   }
-
   ytSearchResults = [{ id: videoId, title: 'Vídeo ' + videoId, channel: '', thumb: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` }];
   ytPlayResult(0);
   document.getElementById('yt-results').classList.remove('show');
+}
+
+// Preserve the page's HTTP Referer (YouTube requires it), including on initial load.
+{
+  const frame = document.getElementById('yt-frame');
+  const url = new URL(frame.src);
+  url.searchParams.set('origin', location.origin);
+  url.searchParams.set('playsinline', '1');
+  frame.src = url.href;
+}
+
+window.onYouTubeIframeAPIReady = function () {
+  ytPlayer = new YT.Player('yt-frame', {
+    events: {
+      onError(event) {
+        const messages = {
+          2: 'O ID do vídeo é inválido.',
+          5: 'O browser não conseguiu reproduzir este vídeo.',
+          100: 'Este vídeo foi removido ou é privado.',
+          101: 'O autor não permite reprodução incorporada.',
+          150: 'O autor não permite reprodução incorporada.',
+          153: 'O YouTube não recebeu a identificação deste site. Verifica as definições de privacidade do browser.',
+        };
+        document.getElementById('yt-message').textContent = (messages[event.data] || 'Não foi possível reproduzir este vídeo.') + ' Usa o link Abrir vídeo no YouTube.';
+      },
+      onAutoplayBlocked() {
+        document.getElementById('yt-message').textContent = 'O browser bloqueou o início automático. Carrega em Play no leitor.';
+      },
+    },
+  });
+};
+{
+  const script = document.createElement('script');
+  script.src = 'https://www.youtube.com/iframe_api';
+  script.onerror = () => {
+    document.getElementById('yt-message').textContent = 'Não foi possível contactar a API do leitor YouTube. Se o leitor não abrir, usa o link acima.';
+  };
+  document.head.appendChild(script);
 }
 
 // ════════════════════════════════════════
@@ -2224,41 +2279,73 @@ function jellyAuthHeader() {
   return auth;
 }
 
+function jellyBaseUrl(value) {
+  let url;
+  try { url = new URL(value); } catch (_) { throw new Error('Endereço inválido. Usa o URL completo, por exemplo https://media.oqen.pt.'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Usa um endereço HTTP/HTTPS sem credenciais no URL.');
+  if (location.protocol === 'https:' && url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
+    throw new Error('O browser bloqueia HTTP a partir deste site HTTPS. Configura HTTPS no Jellyfin ou abre este site num servidor HTTP local.');
+  }
+  url.search = '';
+  url.hash = '';
+  // Accept links copied from the web client, preserving a reverse-proxy base path.
+  url.pathname = url.pathname.replace(/\/web(?:\/.*)?$/i, '').replace(/\/+$/, '');
+  return url.href.replace(/\/+$/, '');
+}
+
 async function jellyFetch(path, opts = {}) {
-  const url = `${jellyServerUrl}${path}`;
-  const res = await fetch(url, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Emby-Authorization': jellyAuthHeader(),
-      ...(opts.headers || {}),
-    }
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  let res;
+  try {
+    res = await fetchTimed(`${jellyServerUrl}${path}`, {
+      ...opts,
+      headers: {
+        ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+        'Authorization': jellyAuthHeader(),
+        ...(opts.headers || {}),
+      }
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('O servidor demorou demasiado a responder. Verifica o endereço e a ligação.');
+    throw new Error('O browser não conseguiu aceder ao servidor. Verifica o certificado HTTPS, a rede e o CORS do Jellyfin/proxy para ' + location.origin + '. Se o servidor estiver numa rede privada, verifica também a permissão de acesso à rede local no browser.');
+  }
+  if (!res.ok) {
+    const messages = {
+      401: 'Autenticação recusada (HTTP 401). Verifica o utilizador e a palavra-passe.',
+      403: 'Acesso recusado (HTTP 403). Verifica as permissões da conta e as regras do proxy.',
+      404: 'API Jellyfin não encontrada (HTTP 404). Verifica o endereço base e o caminho do proxy.',
+    };
+    throw new Error(messages[res.status] || `O servidor respondeu com HTTP ${res.status}.`);
+  }
+  try { return await res.json(); }
+  catch (_) { throw new Error('O endereço respondeu sem JSON da API Jellyfin. Verifica se aponta para o servidor correto e se o proxy exige outro login.'); }
 }
 
 async function connectJellyfin() {
-  const url = document.getElementById('jelly-server-url').value.trim().replace(/\/$/, '');
+  const btn = document.getElementById('jelly-connect-btn');
+  if (btn.disabled) return;
   const username = document.getElementById('jelly-username').value.trim();
   const password = document.getElementById('jelly-password').value;
-
-  if (!url || !username) { showJellyError('Preenche o URL do servidor e o utilizador.'); return; }
-
-  jellyServerUrl = url;
-  const btn = document.getElementById('jelly-connect-btn');
-  btn.disabled = true; btn.textContent = '⏳ A ligar...';
-
+  const errorEl = document.getElementById('jellyfin-error');
+  errorEl.classList.remove('show');
+  jellyToken = ''; jellyUserId = ''; jellySections = [];
+  setStatus('s-jelly', 'DESLIGADO', 'off');
+  document.getElementById('jelly-badge').textContent = 'DESLIGADO';
   try {
+    if (!username) throw new Error('Preenche o utilizador.');
+    jellyServerUrl = jellyBaseUrl(document.getElementById('jelly-server-url').value.trim());
+    btn.disabled = true; btn.textContent = '⏳ A ligar...';
     const data = await jellyFetch('/Users/AuthenticateByName', {
       method: 'POST',
       body: JSON.stringify({ Username: username, Pw: password })
     });
+    if (!data.AccessToken || !data.User?.Id) throw new Error('Resposta de autenticação Jellyfin inválida: faltam o token ou o utilizador.');
     jellyToken = data.AccessToken;
-    jellyUserId = data.User?.Id;
-    await fetchJellyLibrary(data.User?.Name || username);
-  } catch(e) {
-    showJellyError('Não foi possível ligar. Verifica o URL, utilizador e palavra-passe.');
+    jellyUserId = data.User.Id;
+    document.getElementById('jelly-password').value = '';
+    await fetchJellyLibrary(data.User.Name || username);
+  } catch (error) {
+    jellyToken = ''; jellyUserId = '';
+    showJellyError(error.message);
   } finally {
     btn.disabled = false; btn.textContent = '🪼 Ligar ao Jellyfin';
   }
@@ -2268,7 +2355,6 @@ function showJellyError(msg) {
   const el = document.getElementById('jellyfin-error');
   el.textContent = '⚠ ' + msg;
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 5000);
 }
 
 async function fetchJellyLibrary(serverName) {
@@ -2297,7 +2383,7 @@ async function fetchJellyLibrary(serverName) {
       sectionsEl.appendChild(btn);
     });
 
-    if (jellySections.length) loadJellySection(jellySections[0].Id);
+    if (jellySections.length) await loadJellySection(jellySections[0].Id);
     else document.getElementById('jelly-lib-content').innerHTML = '<div class="jelly-lib-loading"><span>Nenhuma biblioteca encontrada.</span></div>';
 
     setStatus('s-jelly', 'LIGADO', '');
@@ -2305,7 +2391,9 @@ async function fetchJellyLibrary(serverName) {
   } catch(e) {
     document.getElementById('jellyfin-setup').style.display = 'flex';
     document.getElementById('jellyfin-library').classList.remove('show');
-    showJellyError('Erro ao carregar biblioteca: ' + e.message);
+    setStatus('s-jelly', 'ERRO', 'off');
+    document.getElementById('jelly-badge').textContent = 'ERRO';
+    showJellyError('Autenticação aceite, mas não foi possível carregar a biblioteca: ' + e.message);
   }
 }
 
