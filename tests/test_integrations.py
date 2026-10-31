@@ -41,6 +41,8 @@ class Integrations(unittest.TestCase):
         self.page.route('**/*', self.route)
         self.page.goto(SITE, wait_until='domcontentloaded')
         self.page.locator('summary').click()
+        self.initial_search_server = self.page.locator('#yt-search-server').input_value()
+        self.page.locator('#yt-search-server').fill('')
 
     def tearDown(self):
         self.context.close()
@@ -101,6 +103,45 @@ class Integrations(unittest.TestCase):
         expect(self.page.locator('#yt-results a')).to_have_attribute('href', 'https://www.youtube.com/results?search_query=lofi%20%26%20music')
         self.assertEqual(self.page.evaluate('openedSearch'), ['https://www.youtube.com/results?search_query=lofi%20%26%20music', '_blank', 'noopener,noreferrer'])
         self.assertEqual(self.requests, [])
+
+    def test_keyless_server_search_plays_results_and_remembers_address(self):
+        self.assertEqual(self.initial_search_server, 'https://mobile.oqen.pt')
+        captured = []
+        def respond(route):
+            captured.append(route.request.url)
+            route.fulfill(content_type='application/json', body=json.dumps({'items': [
+                {'id': 'dQw4w9WgXcQ', 'title': 'Keyless result', 'channel': 'Demo'},
+                {'id': 'not-a-video-id', 'title': 'Invalid result'},
+            ]}))
+        self.page.route('https://mobile.oqen.pt/api/search?*', respond)
+        self.page.locator('#yt-search-server').fill('https://mobile.oqen.pt/')
+        expect(self.page.locator('#yt-search-btn')).to_have_text('🔍 Pesquisar aqui')
+        self.page.locator('#yt-search-input').fill('lofi & music')
+        self.page.locator('#yt-search-btn').click()
+        expect(self.page.locator('.yt-result-title')).to_have_text('Keyless result')
+        self.assertEqual(parse_qs(urlparse(captured[0]).query), {'q': ['lofi & music']})
+        self.assertEqual(self.requests, [])  # No Google API key or request involved.
+        self.page.locator('.yt-result-item').click()
+        expect(self.page.locator('#yt-open-video')).to_have_attribute('href', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+        self.page.reload(wait_until='domcontentloaded')
+        expect(self.page.locator('#yt-search-server')).to_have_value('https://mobile.oqen.pt/')
+
+    def test_keyless_server_failure_has_actionable_error_and_fallback(self):
+        self.page.route('https://mobile.oqen.pt/api/search?*', lambda route: route.fulfill(
+            status=502, content_type='application/json', body=json.dumps({'error': 'YouTube bloqueou a pesquisa da VPS.'})))
+        self.page.locator('#yt-search-server').fill('https://mobile.oqen.pt')
+        self.page.locator('#yt-search-input').fill('music')
+        self.page.locator('#yt-search-btn').click()
+        expect(self.page.locator('#yt-results')).to_contain_text('YouTube bloqueou a pesquisa da VPS.')
+        expect(self.page.locator('#yt-results a')).to_be_visible()
+        expect(self.page.locator('#yt-search-btn')).to_be_enabled()
+
+    def test_keyless_server_rejects_http_before_sending_request(self):
+        self.page.locator('#yt-search-server').fill('http://mobile.oqen.pt')
+        self.page.locator('#yt-search-input').fill('music')
+        self.page.locator('#yt-search-btn').click()
+        expect(self.page.locator('#yt-results')).to_contain_text('URL HTTPS')
+        expect(self.page.locator('#yt-search-btn')).to_be_enabled()
 
     def test_player_waits_for_ready_and_plays_latest_selection(self):
         self.page.evaluate('''() => {

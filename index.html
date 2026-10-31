@@ -772,12 +772,15 @@
         <input class="yt-search-input" type="text" id="yt-search-input"
           placeholder="Pesquisar ou colar URL / ID do YouTube"
           onkeydown="if(event.key==='Enter') ytSearch()">
-        <button class="yt-search-btn" id="yt-search-btn" onclick="ytSearch()">🔍 Pesquisar no YouTube ↗</button>
+        <button class="yt-search-btn" id="yt-search-btn" onclick="ytSearch()">🔍 Pesquisar aqui</button>
       </div>
-      <p id="yt-search-help" style="padding:0 18px;color:var(--dim);font-size:13px">Sem chave de API: a pesquisa abre o YouTube numa nova aba. Para reproduzir aqui, cola o URL ou ID de um vídeo na barra acima.</p>
+      <p id="yt-search-help" style="padding:0 18px;color:var(--dim);font-size:13px">Pesquisa nesta página sem chave YouTube através do serviço configurado. Também podes colar um URL ou ID de vídeo.</p>
       <details style="padding:12px 18px;color:var(--dim);font-size:13px">
-        <summary>Pesquisa integrada no YouTube</summary>
-        <p>Para pesquisar aqui, usa uma chave da YouTube Data API v3 com restrições ao domínio deste site e à API YouTube. A chave fica apenas nesta página até a fechares. Sem chave, pesquisa diretamente no YouTube ou cola um URL / ID acima.</p>
+        <summary>Definições de pesquisa YouTube</summary>
+        <label for="yt-search-server">Serviço de pesquisa sem chave</label>
+        <input class="yt-search-input" id="yt-search-server" type="url" value="https://mobile.oqen.pt" placeholder="https://mobile.oqen.pt" autocomplete="off">
+        <p>Este endereço é guardado apenas neste browser. Se o serviço estiver indisponível, podes usar o link de pesquisa direta no YouTube. Apaga o endereço para usar apenas a pesquisa externa.</p>
+        <p>Opcional: para usar a API oficial em vez do serviço acima, introduz uma chave YouTube Data API v3 com restrições ao domínio deste site e à API YouTube. A chave fica apenas nesta página até a fechares. Sem chave, é usado o serviço configurado acima.</p>
         <label for="yt-api-key">Chave YouTube Data API v3</label>
         <input class="yt-search-input" id="yt-api-key" type="password" autocomplete="off" placeholder="Chave da API (opcional)">
       </details>
@@ -1320,7 +1323,7 @@
   </div>
 
   <footer>
-    <p id="app-version">Versão 2.0.3</p>
+    <p id="app-version">Versão 2.0.4</p>
     <div style="margin-bottom:24px;padding:18px 20px;background:rgba(232,168,0,0.05);border:1px solid rgba(232,168,0,0.18);border-radius:12px;display:inline-flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center;">
       <a href="https://paypal.me/Davidfferreira1986?locale.x=pt_PT&country.x=PT" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:12px;text-decoration:none;">
         <img src="https://em-content.zobj.net/source/microsoft/379/hot-beverage_2615.png" alt="☕" style="width:40px;height:40px;filter:drop-shadow(0 0 8px rgba(232,168,0,0.5));">
@@ -2023,15 +2026,40 @@ function ytSearchFallback(query, message) {
   el.append(text, link);
 }
 
+function ytSearchServer() {
+  const value = document.getElementById('yt-search-server').value.trim();
+  if (!value) return null;
+  let url;
+  try { url = new URL(value); } catch (_) { throw new Error('Endereço do serviço de pesquisa inválido. Usa um URL HTTPS completo.'); }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+    throw new Error('O serviço de pesquisa precisa de um URL HTTPS sem credenciais, parâmetros ou fragmentos.');
+  }
+  return url.href.replace(/\/+$/, '');
+}
+
 function updateYtSearchMode() {
   const hasKey = !!document.getElementById('yt-api-key').value.trim();
+  const hasServer = !!document.getElementById('yt-search-server').value.trim();
   const btn = document.getElementById('yt-search-btn');
-  if (!btn.disabled) btn.textContent = hasKey ? '🔍 Pesquisar aqui' : '🔍 Pesquisar no YouTube ↗';
+  if (!btn.disabled) btn.textContent = hasKey || hasServer ? '🔍 Pesquisar aqui' : '🔍 Pesquisar no YouTube ↗';
   document.getElementById('yt-search-help').textContent = hasKey
     ? 'Pesquisa nesta página com a YouTube Data API. URLs ou IDs diretos não precisam de chave.'
-    : 'Sem chave de API: a pesquisa abre o YouTube numa nova aba. Para reproduzir aqui, cola o URL ou ID de um vídeo na barra acima.';
+    : hasServer ? 'Pesquisa nesta página sem chave YouTube através do serviço configurado. Também podes colar um URL ou ID de vídeo.'
+    : 'Sem serviço configurado: a pesquisa abre o YouTube numa nova aba. Cola o URL do vídeo para o reproduzir aqui.';
 }
 document.getElementById('yt-api-key').addEventListener('input', updateYtSearchMode);
+{
+  const input = document.getElementById('yt-search-server');
+  try {
+    const saved = localStorage.getItem('yt-search-server');
+    if (saved !== null) input.value = saved;
+  } catch (_) { /* Local storage may be unavailable in private browsers. */ }
+  input.addEventListener('input', () => {
+    try { localStorage.setItem('yt-search-server', input.value.trim()); } catch (_) {}
+    updateYtSearchMode();
+  });
+  updateYtSearchMode();
+}
 
 async function ytSearch() {
   const query = document.getElementById('yt-search-input').value.trim();
@@ -2041,7 +2069,7 @@ async function ytSearch() {
   const resultsEl = document.getElementById('yt-results');
   resultsEl.classList.add('show');
   const key = document.getElementById('yt-api-key').value.trim();
-  if (!key) {
+  if (!key && !document.getElementById('yt-search-server').value.trim()) {
     window.open('https://www.youtube.com/results?search_query=' + encodeURIComponent(query), '_blank', 'noopener,noreferrer');
     ytSearchFallback(query, 'Pesquisa aberta no YouTube. Se a nova aba foi bloqueada, usa o link abaixo. Para reproduzir aqui, cola o URL do vídeo na barra acima.');
     return;
@@ -2050,20 +2078,31 @@ async function ytSearch() {
   btn.textContent = '⏳ A pesquisar...';
   resultsEl.textContent = 'A pesquisar no YouTube...';
   try {
-    const params = new URLSearchParams({ part: 'snippet', type: 'video', videoEmbeddable: 'true', maxResults: '12', q: query, key });
-    const response = await fetchTimed('https://www.googleapis.com/youtube/v3/search?' + params);
-    if (!response.ok) {
-      throw new Error(response.status === 403 ? 'Chave sem acesso, restrição de domínio ou quota da API excedida.' : 'A API YouTube não respondeu à pesquisa (HTTP ' + response.status + ').');
+    let items;
+    if (!key) {
+      const server = ytSearchServer();
+      const response = await fetchTimed(server + '/api/search?' + new URLSearchParams({ q: query }), {}, 25000);
+      let data;
+      try { data = await response.json(); }
+      catch (_) { throw new Error('O serviço de pesquisa não respondeu com JSON. Verifica a configuração do domínio no Coolify.'); }
+      if (!response.ok) throw new Error(data.error || 'O serviço de pesquisa respondeu com HTTP ' + response.status + '.');
+      if (!Array.isArray(data.items)) throw new Error('Resposta inválida do serviço de pesquisa.');
+      items = data.items;
+    } else {
+      const params = new URLSearchParams({ part: 'snippet', type: 'video', videoEmbeddable: 'true', maxResults: '12', q: query, key });
+      const response = await fetchTimed('https://www.googleapis.com/youtube/v3/search?' + params);
+      if (!response.ok) throw new Error(response.status === 403 ? 'Chave sem acesso, restrição de domínio ou quota da API excedida.' : 'A API YouTube respondeu com HTTP ' + response.status + '.');
+      const data = await response.json();
+      items = (data.items || []).map(v => ({ id: v.id?.videoId, title: v.snippet?.title, channel: v.snippet?.channelTitle }));
     }
-    const data = await response.json();
     ytSelectedIndex = -1;
-    ytSearchResults = (data.items || []).filter(v => /^[a-zA-Z0-9_-]{11}$/.test(v.id?.videoId || '')).map(v => ({
-      id: v.id.videoId, title: v.snippet?.title || 'Sem título', channel: v.snippet?.channelTitle || '',
-      thumb: 'https://i.ytimg.com/vi/' + v.id.videoId + '/mqdefault.jpg',
+    ytSearchResults = items.filter(v => v && /^[a-zA-Z0-9_-]{11}$/.test(v.id || '')).slice(0, 12).map(v => ({
+      id: v.id, title: String(v.title || 'Sem título'), channel: String(v.channel || ''),
+      thumb: 'https://i.ytimg.com/vi/' + v.id + '/mqdefault.jpg',
     }));
     renderYtResults(ytSearchResults, query);
   } catch (error) {
-    ytSearchFallback(query, error.name === 'AbortError' ? 'A pesquisa demorou demasiado. Tenta novamente.' : (error instanceof TypeError ? 'Sem ligação à API YouTube. Verifica a rede.' : error.message));
+    ytSearchFallback(query, error.name === 'AbortError' ? 'A pesquisa demorou demasiado. Tenta novamente.' : (error instanceof TypeError ? 'Não foi possível aceder à pesquisa. Verifica se o serviço está publicado por HTTPS e permite este site (CORS).' : error.message));
   } finally {
     btn.disabled = false;
     updateYtSearchMode();

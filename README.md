@@ -143,7 +143,11 @@ O frontend pode continuar no GitHub Pages, mas a autenticação e o serviço de 
 
 A barra aceita um URL/ID diretamente, incluindo links `youtu.be`, `watch`, `shorts` e `live`, sem chave de API.
 
-Para resultados dentro desta página, abre **Pesquisa integrada no YouTube** e introduz uma chave da **YouTube Data API v3**. Ativa essa API no projeto Google Cloud e restringe a chave à API YouTube e aos referenciadores HTTP do site (por exemplo `https://andrenunesjob.github.io/*`). A chave fica apenas em memória nesta página; não a coloques no código ou no Git. A pesquisa está sujeita à quota da API. Sem chave, o botão **Pesquisar no YouTube ↗** abre a pesquisa numa nova aba e mantém um link alternativo caso o browser bloqueie a abertura. Copia o URL de um vídeo para o reproduzir nesta página.
+Para resultados nesta página **sem chave YouTube**, publica o serviço Docker no teu VPS em `https://mobile.oqen.pt`. O frontend já usa esse endereço por omissão. Segue as [instruções de publicação no Coolify](youtube-search/README.md). O serviço pesquisa através do yt-dlp; a reprodução continua no leitor oficial YouTube. O acesso real depende de o YouTube permitir pesquisas a partir do IP da VPS.
+
+Em **Definições de pesquisa YouTube** podes alterar o endereço do serviço. Esse URL não secreto fica guardado apenas no browser. Se apagares o endereço e não tiveres uma chave configurada, a pesquisa abre o YouTube numa nova aba.
+
+A **YouTube Data API v3** continua disponível como alternativa opcional: uma chave introduzida tem prioridade sobre o serviço sem chave e fica apenas em memória na página. Restringe-a à API YouTube e aos referenciadores HTTP do site (por exemplo `https://andrenunesjob.github.io/*`). Não a coloques no código ou no Git.
 
 O leitor aguarda o evento de inicialização da API antes de enviar o vídeo selecionado, envia a origem e preserva o referenciador HTTP exigido pelo YouTube. Vídeos privados, removidos ou sem autorização para incorporação continuam sujeitos às regras do YouTube. Há mensagens para erros do leitor e um link permanente para abrir o vídeo diretamente. O browser pode exigir um clique em Play para iniciar a reprodução.
 
