@@ -216,6 +216,10 @@ Com o vídeo a tocar usa os botões **◀ Anterior** e **Próximo ▶** para tro
 3. Clica em **Ligar ao Jellyfin**
 4. Navega pela biblioteca e clica num item para reproduzir
 
+### Navegação de séries
+
+As bibliotecas de séries mostram **Série → Temporada → Episódios**. As temporadas e os episódios são ordenados pelo número, incluindo especiais (temporada 0). Usa os botões de navegação acima da grelha para regressar à série ou à biblioteca. Atualizar recarrega a vista atual; fechar o leitor mantém a temporada selecionada. Filmes continuam a abrir diretamente no leitor.
+
 ### Ligações a partir do GitHub Pages
 
 Usa o endereço base HTTPS com certificado válido, por exemplo `https://media.oqen.pt`. Links copiados de `/web/index.html#!/home.html` são normalizados; caminhos base de proxies (ex. `/jellyfin`) são preservados.

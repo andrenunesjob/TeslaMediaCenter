@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import unittest
+from urllib.parse import urlparse, parse_qs
 from playwright.sync_api import sync_playwright, expect
 
 HTML = (Path(__file__).resolve().parents[1] / 'index.html').read_text()
@@ -30,6 +31,12 @@ class Integrations(unittest.TestCase):
         self.auth_status = 200
         self.auth_body = {'AccessToken': 'test-token', 'User': {'Id': 'user-1', 'Name': 'Demo'}}
         self.views_status = 200
+        self.library_views = [{'Id': 'movies', 'Name': 'Filmes', 'CollectionType': 'movies'}]
+        self.episodes = [
+            {'Id': 'ep-10', 'Name': 'Finale', 'Type': 'Episode', 'IndexNumber': 10},
+            {'Id': 'ep-2', 'Name': 'Second episode', 'Type': 'Episode', 'IndexNumber': 2},
+        ]
+        self.episodes_status = 200
         self.page.on('pageerror', lambda e: self.errors.append(str(e)))
         self.page.route('**/*', self.route)
         self.page.goto(SITE, wait_until='domcontentloaded')
@@ -51,7 +58,19 @@ class Integrations(unittest.TestCase):
             if request.url.endswith('/Users/AuthenticateByName'):
                 route.fulfill(status=self.auth_status, content_type='application/json', body=json.dumps(self.auth_body))
             elif request.url.endswith('/Views'):
-                route.fulfill(status=self.views_status, content_type='application/json', body=json.dumps({'Items': [{'Id': 'movies', 'Name': 'Filmes', 'CollectionType': 'movies'}]}))
+                route.fulfill(status=self.views_status, content_type='application/json', body=json.dumps({'Items': self.library_views}))
+            elif urlparse(request.url).path.endswith('/Shows/show-1/Seasons'):
+                route.fulfill(content_type='application/json', body=json.dumps({'Items': [
+                    {'Id': 'season-10', 'Name': 'Season 10', 'Type': 'Season', 'IndexNumber': 10},
+                    {'Id': 'specials', 'Name': 'Specials', 'Type': 'Season', 'IndexNumber': 0},
+                    {'Id': 'season-2', 'Name': 'Season 2', 'Type': 'Season', 'IndexNumber': 2},
+                ]}))
+            elif urlparse(request.url).path.endswith('/Shows/show-1/Episodes'):
+                route.fulfill(status=self.episodes_status, content_type='application/json', body=json.dumps({'Items': self.episodes}))
+            elif '/PlaybackInfo?' in request.url:
+                route.fulfill(content_type='application/json', body=json.dumps({'MediaSources': [{'Id': 'source-1'}]}))
+            elif parse_qs(urlparse(request.url).query).get('ParentId') == ['tv']:
+                route.fulfill(content_type='application/json', body=json.dumps({'Items': [{'Id': 'show-1', 'Name': 'Test show', 'Type': 'Series'}]}))
             else:
                 route.fulfill(content_type='application/json', body=json.dumps({'Items': [{'Id': 'film', 'Name': 'Test film', 'ProductionYear': 2026}]}))
         else:
@@ -190,6 +209,76 @@ class Integrations(unittest.TestCase):
         expect(self.page.locator('#jellyfin-error')).to_contain_text('HTTP 403')
         expect(self.page.locator('#jellyfin-setup')).to_be_visible()
         expect(self.page.locator('#jelly-badge')).to_have_text('ERRO')
+
+    def open_tv_season(self):
+        self.library_views.append({'Id': 'tv', 'Name': 'TV', 'CollectionType': 'tvshows'})
+        self.login()
+        self.page.locator('.jelly-section-btn', has_text='TV').click()
+        expect(self.page.locator('.jelly-media-title')).to_have_text('Test show')
+        self.page.locator('.jelly-media-item').click()
+        expect(self.page.locator('.jelly-media-title')).to_have_text(['Specials', 'Season 2', 'Season 10'])
+        self.page.locator('.jelly-media-item', has_text='Season 2').click()
+
+    def test_tv_groups_series_seasons_episodes_and_preserves_return_location(self):
+        self.open_tv_season()
+        expect(self.page.locator('.jelly-media-title')).to_have_text(['2. Second episode', '10. Finale'])
+        tv_request = next(r for r in self.requests if 'ParentId=tv' in r.url)
+        self.assertEqual(parse_qs(urlparse(tv_request.url).query)['IncludeItemTypes'], ['Series'])
+        episode_request = next(r for r in self.requests if '/Episodes?' in r.url)
+        self.assertEqual(parse_qs(urlparse(episode_request.url).query)['SeasonId'], ['season-2'])
+        self.assertFalse(any('/PlaybackInfo?' in r.url for r in self.requests))
+        self.page.locator('.jelly-media-item', has_text='Second episode').click()
+        expect(self.page.locator('#jellyfin-player-wrap')).to_be_visible()
+        expect(self.page.locator('#jellyfin-video')).to_have_attribute('src', SERVER + '/Videos/ep-2/stream?Static=true&MediaSourceId=source-1&api_key=test-token')
+        self.page.locator('#jellyfin-player-wrap button').click()
+        expect(self.page.locator('.jelly-media-title')).to_have_text(['2. Second episode', '10. Finale'])
+        expect(self.page.locator('#jelly-breadcrumbs button[aria-current="page"]')).to_have_text('Season 2')
+        self.page.evaluate('jellyRefresh()')
+        expect(self.page.locator('.jelly-media-title')).to_have_text(['2. Second episode', '10. Finale'])
+        self.assertIn('/Episodes?', self.requests[-1].url)
+        self.page.locator('#jelly-breadcrumbs button', has_text='Test show').click()
+        expect(self.page.locator('.jelly-media-title')).to_have_text(['Specials', 'Season 2', 'Season 10'])
+        self.page.locator('#jelly-breadcrumbs button', has_text='TV').click()
+        expect(self.page.locator('.jelly-media-title')).to_have_text('Test show')
+
+    def test_movies_still_open_player_directly(self):
+        self.login()
+        expect(self.page.locator('.jelly-media-title')).to_have_text('Test film')
+        self.page.locator('.jelly-media-item').click()
+        expect(self.page.locator('#jellyfin-player-wrap')).to_be_visible()
+        expect(self.page.locator('#jelly-np-title')).to_have_text('Test film')
+        self.assertFalse(any('/Seasons?' in r.url or '/Episodes?' in r.url for r in self.requests))
+
+    def test_empty_season_and_failed_request_can_be_retried(self):
+        self.episodes = []
+        self.open_tv_season()
+        expect(self.page.locator('#jelly-lib-content')).to_have_text('Nenhum episódio disponível.')
+        self.episodes_status = 500
+        self.page.evaluate('jellyRefresh()')
+        expect(self.page.locator('#jelly-lib-content')).to_contain_text('HTTP 500')
+        self.episodes_status = 200
+        self.episodes = [{'Id': 'ep-1', 'Name': 'Pilot', 'Type': 'Episode', 'IndexNumber': 1}]
+        self.page.evaluate('jellyRefresh()')
+        expect(self.page.locator('.jelly-media-title')).to_have_text('1. Pilot')
+        self.page.locator('.jelly-section-btn', has_text='Filmes').click()
+        expect(self.page.locator('#jelly-breadcrumbs button')).to_have_text('Filmes')
+        expect(self.page.locator('.jelly-media-title')).to_have_text('Test film')
+
+    def test_late_seasons_response_does_not_replace_another_library(self):
+        self.library_views.append({'Id': 'tv', 'Name': 'TV', 'CollectionType': 'tvshows'})
+        self.login()
+        held = []
+        self.page.route('**/Shows/show-1/Seasons?*', lambda route: held.append(route))
+        self.page.locator('.jelly-section-btn', has_text='TV').click()
+        self.page.locator('.jelly-media-item', has_text='Test show').click()
+        expect(self.page.locator('#jelly-lib-content')).to_have_text('A carregar...')
+        self.page.locator('.jelly-section-btn', has_text='Filmes').click()
+        expect(self.page.locator('.jelly-media-title')).to_have_text('Test film')
+        self.assertEqual(len(held), 1)
+        held[0].fulfill(content_type='application/json', body=json.dumps({'Items': [{'Id': 'late', 'Name': 'Late season', 'Type': 'Season'}]}))
+        self.page.evaluate('new Promise(requestAnimationFrame)')
+        expect(self.page.locator('.jelly-media-title')).to_have_text('Test film')
+        expect(self.page.locator('#jelly-breadcrumbs button')).to_have_text('Filmes')
 
 
 if __name__ == '__main__':

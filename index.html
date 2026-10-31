@@ -1012,6 +1012,7 @@
           </div>
         </div>
         <div class="jelly-sections" id="jelly-sections"></div>
+        <nav id="jelly-breadcrumbs" aria-label="Navegação da biblioteca Jellyfin" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 18px"></nav>
         <div id="jelly-lib-content"></div>
       </div>
 
@@ -1319,7 +1320,7 @@
   </div>
 
   <footer>
-    <p id="app-version">Versão 2.0.2</p>
+    <p id="app-version">Versão 2.0.3</p>
     <div style="margin-bottom:24px;padding:18px 20px;background:rgba(232,168,0,0.05);border:1px solid rgba(232,168,0,0.18);border-radius:12px;display:inline-flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center;">
       <a href="https://paypal.me/Davidfferreira1986?locale.x=pt_PT&country.x=PT" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:12px;text-decoration:none;">
         <img src="https://em-content.zobj.net/source/microsoft/379/hot-beverage_2615.png" alt="☕" style="width:40px;height:40px;filter:drop-shadow(0 0 8px rgba(232,168,0,0.5));">
@@ -1465,22 +1466,19 @@ function installBypass(videoEl, isPausedRef) {
 
   videoEl.addEventListener('pause', () => {
     if (!isPausedRef.value) {
-      const isDriving = _lastGear && _lastGear !== 'P' && _lastGear !== 'park';
-      const forceResume = document.visibilityState === 'hidden' || isDriving || simActive;
+      const forceResume = document.visibilityState === 'hidden' || simActive;
       debouncedResume(forceResume ? 60 : 120);
     }
   });
 
   videoEl.addEventListener('stalled', () => { if (!isPausedRef.value) debouncedResume(600); });
   videoEl.addEventListener('waiting', () => {
-    const isDriving = _lastGear && _lastGear !== 'P' && _lastGear !== 'park';
-    if (!isPausedRef.value && (document.visibilityState === 'hidden' || isDriving || simActive)) {
+    if (!isPausedRef.value && (document.visibilityState === 'hidden' || simActive)) {
       debouncedResume(300);
     }
   });
   videoEl.addEventListener('canplay', () => {
-    const isDriving = _lastGear && _lastGear !== 'P' && _lastGear !== 'park';
-    if (!isPausedRef.value && (isDriving || simActive || document.visibilityState === 'hidden')) {
+    if (!isPausedRef.value && (simActive || document.visibilityState === 'hidden')) {
       videoEl.play().catch(() => {});
     }
   });
@@ -2193,6 +2191,8 @@ let jellyToken = '';
 let jellyServerUrl = '';
 let jellyUserId = '';
 let jellySections = [];
+let jellyPath = [];
+let jellyBrowseRequest = 0;
 const jellyPaused = { value: false };
 const JELLY_CLIENT = 'Tesla Media Center';
 const JELLY_DEVICE = 'Tesla';
@@ -2254,6 +2254,7 @@ async function connectJellyfin() {
   const errorEl = document.getElementById('jellyfin-error');
   errorEl.classList.remove('show');
   jellyToken = ''; jellyUserId = ''; jellySections = [];
+  jellyPath = []; jellyBrowseRequest++;
   setStatus('s-jelly', 'DESLIGADO', 'off');
   document.getElementById('jelly-badge').textContent = 'DESLIGADO';
   try {
@@ -2323,19 +2324,68 @@ async function fetchJellyLibrary(serverName) {
   }
 }
 
-async function loadJellySection(parentId) {
-  document.getElementById('jelly-lib-content').innerHTML = '<div class="jelly-lib-loading"><div class="pin-spinner" style="border-top-color:#00a4dc"></div><span>A carregar...</span></div>';
+function loadJellySection(parentId) {
+  const section = jellySections.find(section => section.Id === parentId);
+  if (!section) return;
+  return loadJellyPage([{ kind: 'library', id: section.Id, name: section.Name, collectionType: section.CollectionType }]);
+}
+
+function renderJellyBreadcrumbs() {
+  const nav = document.getElementById('jelly-breadcrumbs');
+  nav.replaceChildren();
+  jellyPath.forEach((node, index) => {
+    if (index) nav.append(document.createTextNode(' › '));
+    const button = document.createElement('button');
+    button.className = 'btn-sm';
+    button.textContent = node.name;
+    if (index === jellyPath.length - 1) button.setAttribute('aria-current', 'page');
+    const path = jellyPath.slice(0, index + 1);
+    button.onclick = () => loadJellyPage(path);
+    nav.appendChild(button);
+  });
+}
+
+async function loadJellyPage(path) {
+  const request = ++jellyBrowseRequest;
+  jellyPath = path;
+  renderJellyBreadcrumbs();
+  const content = document.getElementById('jelly-lib-content');
+  content.textContent = 'A carregar...';
+  const node = path[path.length - 1];
+  const params = new URLSearchParams({ UserId: jellyUserId, Fields: 'Overview,MediaSources' });
+  let endpoint;
+  if (node.kind === 'series') {
+    endpoint = `/Shows/${encodeURIComponent(node.id)}/Seasons`;
+  } else if (node.kind === 'season') {
+    endpoint = `/Shows/${encodeURIComponent(node.seriesId)}/Episodes`;
+    params.set('SeasonId', node.id);
+    params.set('SortBy', 'IndexNumber');
+    params.set('SortOrder', 'Ascending');
+  } else {
+    endpoint = `/Users/${encodeURIComponent(jellyUserId)}/Items`;
+    params.set('ParentId', node.id);
+    params.set('Recursive', 'true');
+    params.set('IncludeItemTypes', node.collectionType === 'tvshows' ? 'Series' : 'Movie,Episode,Video');
+    params.set('SortBy', 'SortName');
+    params.set('SortOrder', 'Ascending');
+  }
   try {
-    const data = await jellyFetch(`/Users/${jellyUserId}/Items?ParentId=${parentId}&Recursive=true&IncludeItemTypes=Movie,Episode,Video&Fields=Overview,MediaSources&SortBy=SortName&SortOrder=Ascending&Limit=100`);
-    renderJellyGrid(data.Items || []);
-  } catch(e) {
-    document.getElementById('jelly-lib-content').innerHTML = '<div class="jelly-lib-loading"><span style="color:var(--accent2)">Erro ao carregar secção.</span></div>';
+    const data = await jellyFetch(endpoint + '?' + params);
+    // Ignore a response from a library/season the user has already left.
+    if (request !== jellyBrowseRequest) return;
+    const items = data.Items || [];
+    if (node.kind !== 'library') items.sort((a, b) => (a.IndexNumber ?? Number.MAX_SAFE_INTEGER) - (b.IndexNumber ?? Number.MAX_SAFE_INTEGER));
+    renderJellyGrid(items, node, path);
+  } catch (error) {
+    if (request !== jellyBrowseRequest) return;
+    content.textContent = 'Erro ao carregar: ' + error.message + ' Usa Atualizar para tentar novamente.';
   }
 }
 
-function renderJellyGrid(items) {
+function renderJellyGrid(items, node, path) {
+  const content = document.getElementById('jelly-lib-content');
   if (!items.length) {
-    document.getElementById('jelly-lib-content').innerHTML = '<div class="jelly-lib-loading"><span>Biblioteca vazia.</span></div>';
+    content.textContent = node.kind === 'series' ? 'Nenhuma temporada disponível.' : node.kind === 'season' ? 'Nenhum episódio disponível.' : 'Biblioteca vazia.';
     return;
   }
   const grid = document.createElement('div');
@@ -2344,20 +2394,42 @@ function renderJellyGrid(items) {
   items.forEach(item => {
     const el = document.createElement('div');
     el.className = 'jelly-media-item';
-    const thumbUrl = `${jellyServerUrl}/Items/${item.Id}/Images/Primary?maxHeight=240&quality=80&api_key=${jellyToken}`;
-    el.innerHTML = `
-      <div class="jelly-media-thumb">
-        <img src="${thumbUrl}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='🎬'">
-      </div>
-      <div class="jelly-media-title">${item.Name || 'Sem título'}</div>
-      ${item.ProductionYear ? `<div class="jelly-media-year">${item.ProductionYear}</div>` : ''}
-    `;
-    el.onclick = () => playJellyItem(item);
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+    const thumb = document.createElement('div');
+    thumb.className = 'jelly-media-thumb';
+    const image = document.createElement('img');
+    image.src = `${jellyServerUrl}/Items/${encodeURIComponent(item.Id)}/Images/Primary?` + new URLSearchParams({ maxHeight: '240', quality: '80', api_key: jellyToken });
+    image.alt = '';
+    image.loading = 'lazy';
+    image.onerror = () => { thumb.textContent = '🎬'; };
+    thumb.appendChild(image);
+    const title = document.createElement('div');
+    title.className = 'jelly-media-title';
+    title.textContent = (node.kind === 'season' && item.IndexNumber != null ? item.IndexNumber + '. ' : '') + (item.Name || 'Sem título');
+    el.append(thumb, title);
+    if (item.ProductionYear) {
+      const year = document.createElement('div');
+      year.className = 'jelly-media-year';
+      year.textContent = item.ProductionYear;
+      el.appendChild(year);
+    }
+    el.onclick = () => {
+      if (node.kind === 'library' && (node.collectionType === 'tvshows' || item.Type === 'Series')) {
+        loadJellyPage([...path, { kind: 'series', id: item.Id, name: item.Name || 'Série' }]);
+      } else if (node.kind === 'series') {
+        loadJellyPage([...path, { kind: 'season', id: item.Id, name: item.Name || 'Temporada', seriesId: node.id }]);
+      } else {
+        playJellyItem(item);
+      }
+    };
+    el.onkeydown = event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); el.click(); }
+    };
     grid.appendChild(el);
   });
 
-  document.getElementById('jelly-lib-content').innerHTML = '';
-  document.getElementById('jelly-lib-content').appendChild(grid);
+  content.replaceChildren(grid);
 }
 
 async function playJellyItem(item) {
@@ -2397,6 +2469,8 @@ function closeJellyPlayer() {
 
 function jellyLogout() {
   jellyToken = ''; jellyServerUrl = ''; jellyUserId = ''; jellySections = [];
+  jellyPath = []; jellyBrowseRequest++;
+  document.getElementById('jelly-breadcrumbs').replaceChildren();
   const video = document.getElementById('jellyfin-video');
   video.pause(); video.src = '';
   document.getElementById('jellyfin-library').classList.remove('show');
@@ -2407,7 +2481,8 @@ function jellyLogout() {
 }
 
 function jellyRefresh() {
-  if (jellySections.length) loadJellySection(jellySections[0].Id);
+  if (jellyPath.length) return loadJellyPage(jellyPath);
+  if (jellySections.length) return loadJellySection(jellySections[0].Id);
 }
 
 // ════════════════════════════════════════
